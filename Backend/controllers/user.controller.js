@@ -82,11 +82,12 @@ export const login = async (req, res) => {
             profilePicture: user.profilePicture,
             bio: user.bio,
             followers: user.followers,
-            following: user.following,
+            followings: user.followings,
             posts: user.posts,
         }
 
         const token = await jwt.sign({userId: user._id,}, process.env.SECRET_KEY, {expiresIn: '1d'});
+
         return res.status(200).cookie('token', token, {
             httpOnly: true,
             sameSite: "strict",
@@ -94,7 +95,8 @@ export const login = async (req, res) => {
         }).json({
             message: `Welcome ${user.username} !`,
             success: true,
-            user: userPayload // Send the user information
+            user: userPayload, // Send the user information
+            token: token,
         });
 
     } catch (error) {
@@ -125,7 +127,7 @@ export const logout = async (req, res) => {
 export const getProfile = async (req, res) => {
     try {
         const userId = req.params.id;
-        let user = await User.findById(userId);
+        let user = await User.findById(userId).select('-password');
 
         if (!user) {
             return res.status(404).json({
@@ -160,7 +162,7 @@ export const editProfile = async (req, res) => {
             cloudResponse = await cloudinary.uploader.upload(fileUri);
         }
 
-        const user = await User.findById(userId);
+        const user = await User.findById(userId).select('-password');
 
         if (!user) {
             return res.status(404).json({
@@ -196,7 +198,7 @@ export const getSuggestedUser = async (req, res) => {
         // Find all users except the logged-in user (exclude the user with req.id)
         // The "$ne" (Not Equal) operator ensures the logged-in user is not included
 
-        const suggestedUsers = await User.find({_id: {$ne: req.id}}).select(-password);
+        const suggestedUsers = await User.find({_id: {$ne: req.id}}).select('-password');
         if (suggestedUsers.length === 0) {
             return res.status(404).json({
                 message: 'User not found',
@@ -216,3 +218,190 @@ export const getSuggestedUser = async (req, res) => {
     }
 };
 
+export const followOrUnfollow = async (req, res) => {
+    try {
+        const currentUserId = req.id;
+        const targetUserId = req.params.id;
+
+        if (currentUserId === targetUserId) {
+            return res.status(400).json({
+                message: 'You cannot follow/unfollow yourself',
+                success: false,
+            });
+        }
+
+        // const user = await User.findById(currentUser);
+        // const targetUser = await User.findById(jiskoFollowKrunga);
+
+        const [currentUser, targetUser] = await Promise.all([
+            User.findById(currentUserId),
+            User.findById(targetUserId),
+        ]);
+
+
+        if (!currentUser || !targetUser) {
+            return res.status(404).json({
+                message: 'User not found',
+                success: false,
+            });
+        }
+
+        const isFollowing = currentUser.followings.includes(targetUserId);
+
+        if (isFollowing) {
+            //Unfollow krne ka logic
+            await Promise.all([
+                User.findByIdAndUpdate(currentUserId, {$pull: {followings: targetUserId}}, {new: true}),
+                User.findByIdAndUpdate(targetUserId, {$pull: {followers: currentUserId}}, {new: true}),
+            ]);
+
+            return res.status(200).json({
+                message: `Unfollowed ${targetUser.username} successfully.`,
+                success: true,
+            })
+
+        } else {
+            //Follow krne ka logic
+            if (targetUser.private) {
+                // ✅ Follow Request Logic for Private Account
+                if (targetUser.followRequests.includes(currentUserId)) {
+                    return res.status(400).json({
+                        message: 'Follow request already sent.',
+                        success: false,
+                    });
+                }
+
+                await User.findByIdAndUpdate(targetUserId, {$addToSet: {followRequests: currentUserId}}, {new: true});
+                return res.status(200).json({
+                    message: 'Follow request sent.',
+                    success: true,
+                });
+
+            } else {
+                await Promise.all([
+                    User.findByIdAndUpdate(currentUserId, {$addToSet: {followings: targetUserId}}, {new: true}),
+                    User.findByIdAndUpdate(targetUserId, {$addToSet: {followers: currentUserId}}, {new: true}),
+                ]);
+
+                return res.status(200).json({
+                    message: `Now following ${targetUser.username}.`,
+                    success: true,
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error during followOrUnfollow:', error);
+        return res.status(500).json({
+            message: 'Internal server error',
+            success: false,
+        });
+    }
+};
+
+export const handleFollowRequest = async (req, res) => {
+    try {
+        const {action} = req.body;
+        const userId = req.id;
+        const requestSenderId = req.params.id;
+
+        const user = await User.findById(userId);
+        const requestSender = await User.findById(requestSenderId);
+
+        if (!user || !requestSender) {
+            return res.status(404).json({message: 'User not found', success: false,});
+        }
+        if (!user.followRequests.includes(requestSenderId)) {
+            return res.status(404).json({message: 'No follow request found', success: false,});
+        }
+
+        if (action === 'accept') {
+            await Promise.all([
+                User.updateOne({_id: userId}, {
+                    $pull: {followRequests: requestSenderId},
+                    $addToSet: {followers: requestSenderId}
+                }),
+                User.updateOne({_id: requestSenderId}, {$addToSet: {followings: userId}})
+            ]);
+
+            return res.status(200).json({message: 'Follow request accepted', success: true});
+        } else if (action === 'reject') {
+            await Promise.all([
+                User.updateOne({_id: userId}, {$pull: {followRequests: requestSenderId}}),
+            ]);
+
+            return res.status(200).json({message: 'Follow request rejected', success: true});
+        }
+
+        return res.status(400).json({message: 'Invalid action', success: false});
+    } catch (error) {
+        console.error('Error handling follow request:', error);
+        return res.status(500).json({message: 'Internal server error', success: false});
+    }
+};
+
+export const toggleProfilePrivacy = async (req, res) => {
+    try {
+        const userId = req.id; // Logged-in user
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                success: false,
+            });
+        }
+
+        // Toggle the privacy status
+        user.private = !user.private;
+        await user.save();
+
+        return res.status(200).json({
+            message: `Profile is now ${user.private ? 'Private' : 'Public'}`,
+            success: true,
+            private: user.private,
+        });
+
+    } catch (error) {
+        console.error('Error during profile privacy toggle:', error);
+        return res.status(500).json({
+            message: 'Internal server error',
+            success: false,
+        });
+    }
+};
+
+export const removeFollower = async (req, res) => {
+    try {
+        const userId = req.id;
+        const followerId = req.params.id;
+
+        const user = await User.findById(userId);
+        const follower = await User.findById(followerId);
+
+        if (!user || !follower) {
+            return res.status(404).json({
+                message: 'User not found',
+                success: false,
+            });
+        }
+
+        if (!user.followers.includes(followerId)) {
+            return res.status(400).json({message: 'This user is not following you.', success: false});
+        }
+
+        await Promise.all([
+            User.updateOne({_id: userId}, {$pull: {followers: followerId}}),
+            User.updateOne({_id: followerId}, {$pull: {followings: userId}})
+
+            // User.findByIdAndUpdate(userId, {$pull: {followers: followerId}}, {new: true}),
+            // User.findByIdAndUpdate(followerId, {$pull: {followers: userId}}, {new: true})
+
+        ]);
+
+        return res.status(200).json({message: 'Follower removed successfully', success: true});
+
+    } catch (error) {
+        console.error('Error during removeFollower:', error);
+        return res.status(500).json({message: 'Internal server error',success: false});
+    }
+};
