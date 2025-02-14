@@ -3,7 +3,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import connectDB from "./utils/db.js";
-import userRoute from "./routes/user.routes.js"
+import userRoute from "./routes/user.routes.js";
+import postRoute from "./routes/post.routes.js";
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use(cors(corsOptions));
 const PORT= 8000;
 
 app.use('/api/v1/user', userRoute);
+app.use('/api/v1/post', postRoute);
 
 app.listen(PORT, ()=>{
     connectDB();

@@ -26,7 +26,5 @@ router.route('/suggested').get(isAuthenticated, getSuggestedUser);
 router.route('/:id/follow').put(isAuthenticated, followOrUnfollow);
 router.route('/:id/follow-request').put(isAuthenticated, handleFollowRequest);
 router.delete('/remove-follower/:id', isAuthenticated, removeFollower);
-
-
-
+    
 export default router;
