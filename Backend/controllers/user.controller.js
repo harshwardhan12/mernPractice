@@ -14,13 +14,24 @@ export const register = async (req, res) => {
       });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username }],
+    });
+    
     if (existingUser) {
-      return res.status(409).json({
-        message: "User with this email already exists.",
-        success: false,
-      });
-    }
+      if (existingUser.email === email) {
+        return res.status(409).json({
+          message: "User with this email already exists.",
+          success: false,
+        });
+      }
+      if (existingUser.username === username) {
+        return res.status(409).json({
+          message: "Username is already taken.",
+          success: false,
+        });
+      }
+    } 
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -31,7 +42,7 @@ export const register = async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "User created successfully.",
+      message: "Signup successful.",
       success: true,
       user: {
         id: newUser._id,

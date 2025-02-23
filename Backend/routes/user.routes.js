@@ -10,11 +10,12 @@ import {
 } from "../controllers/user.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
 import upload from "../middlewares/multer.js";
+import validateUser from '../middlewares/validateUser.js';
 
 const router = express.Router();
 
-router.route('/register').post(register);
-router.route('/login').post(login);
+router.route('/register').post(validateUser("register"), register);
+router.route('/login').post(validateUser("login"), login);
 router.route('/logout').get(logout);
 
 router.route('/profile/:id').get(isAuthenticated, getProfile);
